@@ -19,6 +19,18 @@ The service is intentionally read-only at the API level. It does not reserve sto
 
 The application starts at `InventoryServiceApplication`. Spring component scanning discovers the controller, service, repository, and exception handler below the `com.javacodeex.inventory` package.
 
+### Application startup flow
+
+```mermaid
+flowchart TD
+    A[Start InventoryServiceApplication] --> B[Spring Boot creates application context]
+    B --> C[Discover controller, service, repository, and exception advice]
+    C --> D[Configure PostgreSQL and JPA]
+    D --> E[Hibernate creates or updates inventory table]
+    E --> F[Run data.sql seed statements]
+    F --> G[Start embedded server on port 8082]
+```
+
 ## 3. Request flow
 
 ```text
@@ -32,6 +44,26 @@ HTTP GET
 ```
 
 The controller accepts the product code from the URL and the requested quantity from the query string. The service validates the quantity, loads the product, and compares the stored quantity with the requested quantity. The response reports the stored quantity and a boolean result; it does not modify the database.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Controller as InventoryController
+    participant Service as InventoryService
+    participant Repository as InventoryRepository
+    participant DB as PostgreSQL
+
+    Client->>Controller: GET /api/inventory/{code}?quantity=n
+    Controller->>Service: checkAvailability(code, n)
+    Service->>Service: Validate n > 0
+    Service->>Repository: findByProductCode(code)
+    Repository->>DB: SELECT inventory row
+    DB-->>Repository: Optional<Inventory>
+    Repository-->>Service: Inventory or empty
+    Service->>Service: Compare stock quantity with n
+    Service-->>Controller: InventoryResponse
+    Controller-->>Client: 200 JSON response
+```
 
 ## 4. API contract
 
@@ -65,6 +97,21 @@ When the requested quantity is greater than the stored quantity, the endpoint st
 `quantity` is annotated with `@Positive`, so a missing, zero, negative, or otherwise invalid request parameter is rejected by Spring validation. The service also checks for `null` or non-positive values so the business rule remains enforced when the service is called directly.
 
 Known error responses are produced by `GlobalExceptionHandler`:
+
+```mermaid
+flowchart TD
+    A[HTTP request] --> B{Request validation}
+    B -->|Invalid or missing quantity| C[Spring validation failure]
+    C --> D[Validation error response]
+    B -->|Valid positive quantity| E[InventoryService]
+    E --> F{Product exists?}
+    F -->|No| G[ProductNotFoundException]
+    G --> H[GlobalExceptionHandler]
+    H --> I[404 PRODUCT_NOT_FOUND]
+    F -->|Yes| J{Stored quantity >= requested?}
+    J -->|Yes| K[200 available: true]
+    J -->|No| L[200 available: false]
+```
 
 | Condition | Status | Error code |
 | --- | ---: | --- |
